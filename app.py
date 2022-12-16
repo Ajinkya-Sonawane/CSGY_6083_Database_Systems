@@ -47,14 +47,27 @@ def transact(buyer, seller, nft, amount):
     sell_query = """INSERT INTO Sell_Txn
     (txn_id, user_id) VALUES 
     (%s, %s)"""
+    audit_id = str(datetime.timestamp(datetime.now()))
+    audit_query = """
+    INSERT INTO Audit (audit_id,audit_description, audit_path, audit_timestamp)
+    VALUES (%s,'NFT Transferred',%s,now())
+    """
+    nft_log_query = """
+    INSERT INTO NFT_Log (audit_id, token_id)
+    VALUES (%s,%s)
+    """
+    audit_path = "Audit/_NFT_log"
     try:
-        conn = psycopg2.connect(database="pds",host="localhost",port="5432")
+        db_info = get_config()
+        conn = psycopg2.connect(**db_info)
         cursor = conn.cursor()
         cursor.execute(nft_query, (amount,nft))
         cursor.execute(nft_owned_query, (buyer,nft))
         cursor.execute(transaction_query, (txn_id,amount,True,nft))
         cursor.execute(buy_query,(txn_id,buyer))
         cursor.execute(sell_query,(txn_id,seller))
+        cursor.execute(audit_query,(audit_id,audit_path))
+        cursor.execute(nft_log_query,(audit_id,nft))
         conn.commit()
         cursor.close()
         conn.close()
@@ -100,65 +113,67 @@ selection = "Created"
 selection = st.radio(
     "List NFTs either created or owned by specific user",
     ('Created', 'Owned'))
-query = f"""SELECT a.name as user FROM Account a
+query = f"""SELECT a.name as user, a.user_id FROM Account a
 join {"nft_owned" if selection == "Owned" else "nft_created"} n on n.user_id = a.user_id
 ORDER BY user;"""
 user = ""
-users = query_db(query)["user"].tolist()
-user = st.selectbox("Choose a user to view owned NFTs", users)   
-if user:  
-    query = f"""select n.token_name AS Token, n.nft_url AS URL, n.current_value AS Value from nft n 
-    join {"nft_owned" if selection == "Owned" else "nft_created"} nft_o on nft_o.token_id = n.token_id 
-    join account a on a.user_id = nft_o.user_id 
-    where a.name ='{user}';"""
-    df = query_db(query)        
-    st.dataframe(df)
+query = query_db(query)
+users = query["user"].tolist()
+users_ids = query["user_id"].tolist()
+user = st.selectbox("Choose a user to view owned NFTs", range(len(users)), format_func=lambda x: users[x])
+query = f"""SELECT n.token_name AS Token, n.nft_url AS URL, n.current_value AS Value FROM NFT n 
+JOIN {"nft_owned" if selection == "Owned" else "nft_created"} nft_o ON nft_o.token_id = n.token_id 
+WHERE nft_o.user_id ='{users_ids[user]}'
+ORDER BY Token;"""
+df = query_db(query)
+df["value"] = pd.to_numeric(df["value"])        
+st.dataframe(df)
+
 
 #3 List Users with Credit Card Expiry between the given years
 expiry_year = st.slider('Select range to list users with credit card expiry', 2022, 2030, (2024,2026))
 query = f"""
-select a.name, f.bank_name  from  account a
-join financial_information_contains f
-on a.user_id=f.user_id
-where f.expiry_year between {expiry_year[0]} AND {expiry_year[1]};
+SELECT a.name, f.bank_name , f.expiry_year as year  FROM  Account a
+JOIN Financial_Information_contains f
+ON a.user_id=f.user_id
+WHERE f.expiry_year between {expiry_year[0]} AND {expiry_year[1]}
+ORDER BY a.name, f.bank_name;
 """
 df = query_db(query)
 st.dataframe(df)
 
 
-#4 
+#4 List NFT transactions including Buyer, Seller and the amount of transaction
 st.write("List NFT transactions including Buyer, Seller and the amount of transaction")
 query = """
-SELECT n.token_name AS Token, a1.name as Buyer, a2.name as Seller, t.amount as amount from nft n
-join Transactions_contains t on n.token_id = t.token_id
-join Buy_Txn b on t.txn_id = b.txn_id
-join Sell_Txn s on t.txn_id = s.txn_id
-join Account a1 on b.user_id = a1.user_id
-join Account a2 on s.user_id = a2.user_id
+SELECT n.token_name AS Token, a1.name as Buyer, a2.name as Seller, t.amount as amount FROM NFT n
+JOIN Transactions_contains t on n.token_id = t.token_id
+JOIN Buy_Txn b on t.txn_id = b.txn_id
+JOIN Sell_Txn s on t.txn_id = s.txn_id
+JOIN Account a1 on b.user_id = a1.user_id
+JOIN Account a2 on s.user_id = a2.user_id
+ORDER BY Token, Amount
 """
 df = query_db(query)
 df["amount"] = pd.to_numeric(df["amount"])
 st.dataframe(df)
 
 
-#5
+#5 List count of NFTs created and owned by Users
 st.write("List count of NFTs created and owned by Users")
 query = """
-with NFOC as (
-select a.user_id, a.name, nft.token_name from  account a
-join nft_owned n
-on a.user_id=n.user_id
-join nft 
-on nft.token_id=n.token_id
+WITH NFOC as (
+SELECT a.name, n.token_id FROM  Account a
+JOIN Nft_Owned n
+ON a.user_id=n.user_id
 UNION
-select a.user_id, a.name, nft.token_name from  account a
-join nft_created n
-on a.user_id=n.user_id
-join nft 
-on nft.token_id=n.token_id
+SELECT a.name, n.token_id FROM  Account a
+JOIN Nft_Created n
+ON a.user_id=n.user_id
 )
-select nfoc.name AS User, count( nfoc.token_name) as Count from nfoc
-group by nfoc.name;
+SELECT name AS User, count( nfoc.token_id) as Count FROM NFOC
+GROUP BY name
+ORDER BY name
 """
 df = query_db(query)
 st.dataframe(df)
