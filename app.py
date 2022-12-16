@@ -178,8 +178,28 @@ ORDER BY name
 df = query_db(query)
 st.dataframe(df)
 
-#6
+#7 Display log history of a NFT Token
+nft_query = f"""
+SELECT n.token_name, n.token_id FROM NFT n
+ORDER BY token_name;
+"""    
+nft_query = query_db(nft_query)
+nfts = nft_query["token_name"].tolist()
+nft_ids = nft_query["token_id"].tolist()
 
+nft = st.selectbox(f"Select NFT for it's log history ",  range(len(nfts)), format_func=lambda x: nfts[x])
+
+nft_query = f"""
+SELECT a.audit_description AS "Description", a.audit_timestamp AS "Timestamp" FROM Audit a
+JOIN NFT_Log nl ON a.audit_id = nl.audit_id
+WHERE nl.token_id = '{nft_ids[nft]}'
+ORDER BY a.audit_timestamp;
+"""
+df = query_db(nft_query)
+st.dataframe(df)
+
+
+#6 Buy and Sell NFTs amongst users
 query1 = """
 SELECT a.name as user, a.user_id  FROM Account a
 ORDER BY user;
