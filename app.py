@@ -108,7 +108,7 @@ st.write("List Users, currency held and their balances")
 st.dataframe(query_db(query))
 
 
-#2 List all NFTs with Current value greater than 50
+#2 List NFTs either created or owned by specific user
 selection = "Created"
 selection = st.radio(
     "List NFTs either created or owned by specific user",
